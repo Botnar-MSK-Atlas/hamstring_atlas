@@ -1,0 +1,250 @@
+---
+title: "Singlenuc_filtering_hamstring"
+author: "Jolet Mimpen"
+date: '2022-05-25'
+output: html_document
+---
+
+
+
+# Libraries
+```{r}
+library(dplyr)
+library(Seurat)
+library(patchwork)
+library(tidyverse)
+library(Matrix)
+library(ggplot2)
+library(scales)
+library(RColorBrewer)
+library(harmony)
+setwd("/Volumes/Seagate Exp/Single nuc data/RDS files")
+```
+
+# Uploading data
+```{r}
+
+so1 <- readRDS("/Volumes/Seagate Exp/Single nuc data/Hamstring data/Ham0_filtered.RDS")
+so2 <- readRDS("/Volumes/Seagate Exp/Single nuc data/Hamstring data/Ham1_filtered.RDS")
+so3 <- readRDS("/Volumes/Seagate Exp/Single nuc data/Hamstring data/Ham2_filtered.RDS")
+so4 <- readRDS("/Volumes/Seagate Exp/Single nuc data/Hamstring data/Ham5_filtered.RDS")
+
+```
+
+# QC Violin plots
+```{r}
+VlnPlot(so1, features = c("nFeature_RNA", "nCount_RNA", "mitoRatio"), ncol = 3)
+VlnPlot(so2, features = c("nFeature_RNA", "nCount_RNA", "mitoRatio"), ncol = 3)
+VlnPlot(so3, features = c("nFeature_RNA", "nCount_RNA", "mitoRatio"), ncol = 3)
+VlnPlot(so4, features = c("nFeature_RNA", "nCount_RNA", "mitoRatio"), ncol = 3)
+```
+
+
+#QC Feature Scatter
+```{r}
+plot1 <- FeatureScatter(so, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
+plot1
+```
+
+#Filtering data hamstring 0
+```{r}
+so1.filt <- subset(so1, subset = nFeature_RNA > 800 & nFeature_RNA < 3000 & nCount_RNA > 1000 & nCount_RNA < 13000 & mitoRatio < 0.05)
+
+plot2 <- FeatureScatter(so1.filt, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
+plot2
+
+VlnPlot(so1.filt, features = c("nFeature_RNA", "nCount_RNA", "mitoRatio"), ncol = 3)
+```
+
+
+#Filtering data hamstring 1
+```{r}
+so2.filt <- subset(so2, subset = nFeature_RNA > 500 & nFeature_RNA < 3000 & nCount_RNA > 1000 & nCount_RNA < 13000 & mitoRatio < 0.05)
+
+plot2 <- FeatureScatter(so2.filt, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
+plot2
+
+VlnPlot(so2.filt, features = c("nFeature_RNA", "nCount_RNA", "mitoRatio"), ncol = 3)
+```
+
+#Filtering data hamstring 2
+```{r}
+so3.filt <- subset(so3, subset = nFeature_RNA > 500 & nFeature_RNA < 3000 & nCount_RNA > 1000 & nCount_RNA < 13000 & mitoRatio < 0.05)
+
+plot2 <- FeatureScatter(so3.filt, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
+plot2
+
+VlnPlot(so3.filt, features = c("nFeature_RNA", "nCount_RNA", "mitoRatio"), ncol = 3)
+```
+
+
+#Filtering data hamstring 5
+```{r}
+so4.filt <- subset(so4, subset = nFeature_RNA > 500 & nFeature_RNA < 3000 & nCount_RNA > 1000 & nCount_RNA < 10000 & mitoRatio < 0.025)
+
+plot2 <- FeatureScatter(so4.filt, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
+plot2
+
+VlnPlot(so4.filt, features = c("nFeature_RNA", "nCount_RNA", "mitoRatio"), ncol = 3)
+```
+
+
+
+#Normalise data
+```{r}
+so1.filt <- NormalizeData(so1.filt) #normalize
+so2.filt <- NormalizeData(so2.filt)
+so3.filt <- NormalizeData(so3.filt)
+so4.filt <- NormalizeData(so4.filt)
+```
+
+
+
+#Plot Dimplot and Elbowplot to pick dims for clustering
+```{r}
+so.filt <- so4.filt
+all.genes <- rownames(so.filt)
+so1.filt <- ScaleData(so.filt, features = all.genes) #scale
+remove(all.genes) #cleanup code
+
+so.filt <- RunPCA(so.filt, features = VariableFeatures(object = so.filt)) #run pca, linear dimensional reduction
+
+plot5 <- DimPlot(so.filt, reduction = "pca")
+
+plot6 <- ElbowPlot(so.filt, ndims = 50, reduction = "pca") #determine dimensionality, pick dims for clustering
+
+plot5
+plot6
+```
+
+
+
+#Find right resolution for your choice of dimensions
+```{r}
+dims.choice <- 30
+resolution.range <- seq(from = 0, to = 1, by = 0.1)
+so.filt <- FindNeighbors(so.filt, dims = 1:dims.choice)
+so.filt <- FindClusters(so.filt, resolution = resolution.range)
+
+clustree(data.integrated3, prefix = "RNA_snn_res.")
+```
+
+#Cluster
+```{r}
+#clustering, using standard seurat dims and resolution, this can be edited
+
+so.filt <- FindNeighbors(so.filt, dims = 1:50)
+so.filt <- FindClusters(so.filt, resolution = 0.5) #play with this number
+so.filt <- RunUMAP(so.filt, dims = 1:50)
+```
+
+
+```{r see umap}
+DimPlot(so.filt, reduction = "umap", label = TRUE, pt.size = 1)
+FeaturePlot(so.filt, features = "nCount_RNA", max.cutoff = 2000)
+FeaturePlot(so.filt, features = "nFeature_RNA")
+FeaturePlot(so.filt, features = "mitoRatio")
+```
+
+
+
+```{r get list of all features, for future conversion}
+hgnc_list <- so.filt[["RNA"]][["hgnc_symbols"]] #USE this list for any future conversion from ensg to hgnc
+hgnc_list <- rownames_to_column(hgnc_list, var = "EnsName")
+```
+
+
+```{r, FindMarkers, Differential expression, for each cluster}
+for (i in 0:11){ #adjust this based on the clusters you want
+  assign(paste0("Cluster", i), FindMarkers(so.filt, ident.1 = i, min.pct = 0.25))
+}
+remove(i) #cleanup
+```
+
+```{r, add name of gene to list}
+whereitis <- match(rownames(Cluster0), hgnc_list$EnsName)
+Cluster0$geneName <- hgnc_list$hgnc_symbols[whereitis]
+whereitis <- match(rownames(Cluster1), hgnc_list$EnsName)
+Cluster1$geneName <- hgnc_list$hgnc_symbols[whereitis]
+#whereitis <- match(rownames(Cluster2), hgnc_list$EnsName)
+#Cluster2$geneName <- hgnc_list$hgnc_symbols[whereitis]
+```
+
+```{r find known cell markers and DotPlot}
+#multiple genes find ENS name and create data frame with both names
+#Cell type annotation
+geneName <- c("COL1A1", "COL1A2", "COL3A1", "DCN", "TPM3", "DES", "PECAM1", "NOTCH3", "PAX7", "PTPRC", "CD163", "CD2", "ADIPOQ") 
+whereitis <- match(geneName, hgnc_list$hgnc_symbols)
+EnsName <- hgnc_list$EnsName[whereitis]
+geneName <- data.frame(geneName, EnsName)
+remove(whereitis, EnsName) #cleanup
+
+#use this to plot and change the title for the gene name
+#plot7 <- DotPlot(so.filt, features = geneName$EnsName)
+plot7 <- DotPlot(so.filt, features = geneName$EnsName, cols = c("blue", "red"))
+
+#plot, remove the xlabels of Ens and replace with gene names
+plot7 + scale_x_discrete(breaks=geneName$EnsName, labels=geneName$geneName) +ggtitle("Cell Type Annotation")
+remove(geneName, plot7) #cleanup
+```
+
+#Muscle markers
+```{r find known cell markers and DotPlot}
+#multiple genes find ENS name and create data frame with both names
+#Cell type annotation
+geneName <- c("TPM3", "DES", "TTN", "NOTCH3", "PAX7", "PTPRC", "CD163", "CD2", "ADIPOQ") 
+whereitis <- match(geneName, hgnc_list$hgnc_symbols)
+EnsName <- hgnc_list$EnsName[whereitis]
+geneName <- data.frame(geneName, EnsName)
+remove(whereitis, EnsName) #cleanup
+
+#use this to plot and change the title for the gene name
+#plot7 <- DotPlot(so.filt, features = geneName$EnsName)
+plot7 <- DotPlot(so.filt, features = geneName$EnsName, cols = c("blue", "red"))
+
+#plot, remove the xlabels of Ens and replace with gene names
+plot7 + scale_x_discrete(breaks=geneName$EnsName, labels=geneName$geneName) +ggtitle("Cell Type Annotation")
+remove(geneName, plot4) #cleanup
+```
+
+
+
+```{r label the clusters}
+#hamstring, change this according to your data
+muscle.labelled <- so.filt
+new.cluster.ids <- c("TPM3+ Fibs", "DCN+ Fibs", "COL19A1+ Fibs", "Macrophages", "Adipocytes", "Satellite cells", "GREM2+ Fibs", "Mural cells", "Endothelial cells 1", "T cells", "Granulocytes", "Endothelial cells 2")
+
+names(new.cluster.ids) <- levels(muscle.labelled)
+muscle.labelled <- RenameIdents(muscle.labelled, new.cluster.ids)
+DimPlot(muscle.labelled, reduction = "umap", label = TRUE, pt.size = 0.8)
+remove(new.cluster.ids) #cleanup
+```
+
+```{r featureplot specific markers}
+#multiple genes find ENS name and create data frame with both names
+geneName <- c("TTN") #
+whereitis <- match(geneName, hgnc_list$hgnc_symbols)
+EnsName <- hgnc_list$EnsName[whereitis]
+geneName <- data.frame(geneName, EnsName)
+remove(whereitis, EnsName) #cleanup
+
+#use this to plot and change the title for the gene name
+VlnPlot(so.filt, features = geneName$EnsName) +ggtitle(geneName$geneName)
+FeaturePlot(so.filt, features = geneName$EnsName) +ggtitle(geneName$geneName)
+remove(geneName) #cleanup
+```
+
+
+
+```{r save}
+saveRDS(so.filt, file="MUSCLE_OMB0785_filtered_seurat.RDS") #change according to name
+```
+
+
+```{r}
+remove(so)
+remove(so.filt)
+remove(plot1)
+remove(plot2)
+```
+
