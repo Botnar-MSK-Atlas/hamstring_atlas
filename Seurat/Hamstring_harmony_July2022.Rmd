@@ -1,0 +1,661 @@
+---
+title: "Harmony_hamstring"
+author: "Jolet Mimpen"
+date: '2022-04-28'
+output: html_document
+---
+
+
+```{r, message=FALSE, cache=FALSE, warning=FALSE}
+knitr::opts_chunk$set(cache=FALSE, warning = FALSE, message = FALSE)
+library(tidyverse)
+library(Matrix)
+library(ggplot2)
+library(scales)
+library(Seurat)
+library(dplyr)
+library(patchwork)
+library(harmony)
+```
+
+#Load filtered Seurat objects
+```{r Read in RDS}
+
+Hamstring0 <- readRDS("Ham0_filtered.RDS")
+Hamstring1 <- readRDS("Ham1_filtered.RDS")
+Hamstring2 <- readRDS("Ham2_filtered.RDS")
+Hamstring5 <- readRDS("Ham5_filtered.RDS")
+```
+
+#Add metadata to each sample
+```{r}
+
+Hamstring0@meta.data$orig.ident <- "HAM_OMB0787"
+Hamstring1@meta.data$orig.ident <- "HAM_OMB1139"
+Hamstring2@meta.data$orig.ident <- "HAM_OMB1140"
+Hamstring5@meta.data$orig.ident <- "HAM_OMB0782"
+
+Hamstring0@meta.data$sex <- "Male"
+Hamstring1@meta.data$sex <- "Male"
+Hamstring2@meta.data$sex <- "Female"
+Hamstring5@meta.data$sex <- "Female"
+
+Hamstring0@meta.data$age <- "39"
+Hamstring1@meta.data$age <- "24"
+Hamstring2@meta.data$age <- "26"
+Hamstring5@meta.data$age <- "18"
+
+Hamstring0@meta.data$surgery <- "ACLR"
+Hamstring1@meta.data$surgery <- "ACLR"
+Hamstring2@meta.data$surgery <- "ACLR"
+Hamstring5@meta.data$surgery <- "ACLR"
+
+Hamstring0@meta.data$batch <- "28JAN2021"
+Hamstring1@meta.data$batch <- "16MAR2021"
+Hamstring2@meta.data$batch <- "16MAR2021"
+Hamstring5@meta.data$batch <- "16MAR2021"
+
+Hamstring0@meta.data$side <- "Right"
+Hamstring1@meta.data$side <- "Right"
+Hamstring2@meta.data$side <- "Right"
+Hamstring5@meta.data$side <- "Left"
+
+```
+
+#Merge datasets
+```{r merge all datasets}
+data.list <- mget(ls(pattern = "Hamstring")) #findanything in global environment with the given name/pattern
+data.integrated <- Reduce(function(x, y){merge(x,y)}, data.list)
+remove(data.list) #cleanup
+```
+
+
+```{r typical seurat pathway}
+data.integrated2 <- data.integrated %>% 
+                FindVariableFeatures(selection.method = "vst", nfeatures = 2000) %>% 
+                ScaleData(verbose=FALSE) %>% 
+                RunPCA(npcs = 50, verbose=FALSE)
+```
+
+#Check distribution by sample
+```{r}
+options(repr.plot.height = 5, repr.plot.width = 20)
+p1 <- DimPlot(object = data.integrated2, reduction = "pca", pt.size = .1, group.by = "sample")
+p2 <- VlnPlot(object = data.integrated2, features = "PC_1", group.by = "sample", pt.size = .1)
+p1 + p2
+remove(p1, p2)
+```
+
+#Check distrubtion by sex
+```{r}
+options(repr.plot.height = 5, repr.plot.width = 20)
+p1 <- DimPlot(object = data.integrated2, reduction = "pca", pt.size = .1, group.by = "sex")
+p2 <- VlnPlot(object = data.integrated2, features = "PC_1", group.by = "sex", pt.size = .1)
+p1 + p2
+remove(p1, p2)
+```
+
+#Check distrubtion by affected side
+```{r}
+options(repr.plot.height = 5, repr.plot.width = 20)
+p1 <- DimPlot(object = data.integrated2, reduction = "pca", pt.size = .1, group.by = "side")
+p2 <- VlnPlot(object = data.integrated2, features = "PC_1", group.by = "side", pt.size = .1)
+p1 + p2
+remove(p1, p2)
+```
+
+#Check distrubtion by batch
+```{r}
+options(repr.plot.height = 5, repr.plot.width = 20)
+p1 <- DimPlot(object = data.integrated2, reduction = "pca", pt.size = .1, group.by = "batch")
+p2 <- VlnPlot(object = data.integrated2, features = "PC_1", group.by = "batch", pt.size = .1)
+p1 + p2
+remove(p1, p2)
+```
+
+#Run Harmony
+```{r}
+data.integrated3 <- RunHarmony(data.integrated2, group.by.vars = "sample", plot_convergence = TRUE)
+```
+
+#Plot Dimplot and Elbowplot to pick dims for clustering
+```{r}
+all.genes <- rownames(data.integrated3)
+data.integrated3 <- ScaleData(data.integrated3, features = all.genes) #scale
+remove(all.genes) #cleanup code
+
+data.integrated3 <- RunPCA(data.integrated3, features = VariableFeatures(object = data.integrated3)) #run pca, linear dimensional reduction
+
+plot5 <- DimPlot(data.integrated3, reduction = "pca")
+
+plot6 <- ElbowPlot(data.integrated3, ndims = 50, reduction = "pca") #determine dimensionality, pick dims for clustering
+
+plot5
+plot6
+```
+
+#Choose dimensions and resolution of clustering
+```{r}
+dims.choice <- 50
+data.integrated3 <- data.integrated3 %>% 
+  RunUMAP(reduction = "harmony", dims = 1:dims.choice) %>% 
+  RunTSNE(reduction = "harmony", dims = 1:dims.choice) %>% 
+  FindNeighbors(reduction = "harmony", dims = 1:dims.choice) %>% 
+  FindClusters(resolution = 0.2) %>% 
+  identity()
+```
+
+
+#Dimplots comparing different groups
+```{r}
+options(repr.plot.height = 4, repr.plot.width = 8)
+DimPlot(data.integrated.labelled, reduction = "umap", group.by = "sample", pt.size = .1, split.by = 'sample')
+DimPlot(data.integrated3, reduction = "umap", group.by = "sample", pt.size = .1)
+
+DimPlot(data.integrated3, reduction = "umap", group.by = "sex", pt.size = .1, split.by = 'sex')
+DimPlot(data.integrated3, reduction = "umap", group.by = "sex", pt.size = .1)
+
+DimPlot(data.integrated3, reduction = "umap", group.by = "side", pt.size = .1, split.by = 'side')
+DimPlot(data.integrated3, reduction = "umap", group.by = "side", pt.size = .1)
+
+DimPlot(data.integrated3, reduction = "umap", group.by = "batch", pt.size = .1, split.by = 'batch')
+DimPlot(data.integrated3, reduction = "umap", group.by = "batch", pt.size = .1)
+```
+
+#Dimplot and featureplot
+```{r}
+options(repr.plot.height = 4, repr.plot.width = 6)
+DimPlot(data.integrated3, reduction = "umap", label = TRUE, pt.size = 0.7)
+DimPlot(data.integrated3, reduction = "umap", label = FALSE, pt.size = 0.7)
+DimPlot(data.integrated3, reduction = "tsne", label = FALSE, pt.size = 0.7)
+FeaturePlot(data.integrated3, features = "nFeature_RNA")
+FeaturePlot(data.integrated3, features = "mitoRatio")
+```
+
+#Bargraph for counts per cluster
+```{r}
+meta.data <- data.integrated.labelled[[]]
+
+# create random classifications for the sake of this example
+#meta.data$condition <- sample(c('A', 'B', 'C'), nrow(meta.data), replace = TRUE)
+
+counts <- group_by(meta.data, sample, seurat_clusters) %>% summarise(count = n())
+
+ggplot(counts, aes(seurat_clusters, count, fill = sample)) + geom_bar(stat = 'identity')
+remove(meta.data, counts) #cleanup
+```
+
+#DE for each cluster
+```{r}
+#nclusters <- nlevels(so.filt$seurat_clusters)
+for (i in 0:11){
+  assign(paste0("Cluster", i), FindMarkers(data.integrated3, ident.1 = i, min.pct = 0.25))
+}
+remove(i) #cleanup
+```
+
+
+#Load SYMBOL name list
+```{r get list of all features, for future conversion}
+hgnc_list <- read_csv("/Volumes/Seagate Exp/Single nuc data/annotation.csv")
+
+hgnc_list <- hgnc_list %>%
+    dplyr::filter(!grepl("LRG_gene", hgnc_list$gene_biotype))
+```
+
+
+
+#Add SYMBOL names to clusters
+```{r}
+whereitis <- match(rownames(newCluster0), hgnc_list$EnsName)
+newCluster0$geneName <- hgnc_list$geneName[whereitis]
+remove(whereitis) #cleanup
+
+whereitis <- match(rownames(Cluster1), hgnc_list$EnsName)
+Cluster1$geneName <- hgnc_list$geneName[whereitis]
+remove(whereitis) #cleanup
+
+whereitis <- match(rownames(Cluster2), hgnc_list$EnsName)
+Cluster2$geneName <- hgnc_list$geneName[whereitis]
+remove(whereitis) #cleanup
+
+whereitis <- match(rownames(Cluster3), hgnc_list$EnsName)
+Cluster3$geneName <- hgnc_list$geneName[whereitis]
+remove(whereitis) #cleanup
+
+whereitis <- match(rownames(Cluster4), hgnc_list$EnsName)
+Cluster4$geneName <- hgnc_list$geneName[whereitis]
+remove(whereitis) #cleanup
+
+whereitis <- match(rownames(Cluster5), hgnc_list$EnsName)
+Cluster5$geneName <- hgnc_list$geneName[whereitis]
+remove(whereitis) #cleanup
+
+whereitis <- match(rownames(Cluster6), hgnc_list$EnsName)
+Cluster6$geneName <- hgnc_list$geneName[whereitis]
+remove(whereitis) #cleanup
+
+whereitis <- match(rownames(Cluster7), hgnc_list$EnsName)
+Cluster7$geneName <- hgnc_list$geneName[whereitis]
+remove(whereitis) #cleanup
+
+whereitis <- match(rownames(Cluster8), hgnc_list$EnsName)
+Cluster8$geneName <- hgnc_list$geneName[whereitis]
+remove(whereitis) #cleanup
+
+whereitis <- match(rownames(Cluster9), hgnc_list$EnsName)
+Cluster9$geneName <- hgnc_list$geneName[whereitis]
+remove(whereitis) #cleanup
+
+whereitis <- match(rownames(Cluster10), hgnc_list$EnsName)
+Cluster10$geneName <- hgnc_list$geneName[whereitis]
+remove(whereitis) #cleanup
+
+whereitis <- match(rownames(Cluster11), hgnc_list$EnsName)
+Cluster11$geneName <- hgnc_list$geneName[whereitis]
+remove(whereitis) #cleanup
+
+
+```
+
+
+
+#Save cluster files
+```{r}
+write.csv(Cluster0, "HAMint3000_Cluster0_20220722.csv")
+write.csv(Cluster1, "HAMint3000_Cluster1_20220722.csv")
+write.csv(Cluster2, "HAMint3000_Cluster2_20220722.csv")
+write.csv(Cluster3, "HAMint3000_Cluster3_20220722.csv")
+write.csv(Cluster4, "HAMint3000_Cluster4_20220722.csv")
+write.csv(Cluster5, "HAMint3000_Cluster5_20220722.csv")
+write.csv(Cluster6, "HAMint3000_Cluster6_20220722.csv")
+write.csv(Cluster7, "HAMint3000_Cluster7_20220722.csv")
+write.csv(Cluster8, "HAMint3000_Cluster8_20220722.csv")
+write.csv(Cluster9, "HAMint3000_Cluster9_20220722.csv")
+write.csv(Cluster10, "HAMint3000_Cluster10_20220722.csv")
+write.csv(Cluster11, "HAMint3000_Cluster11_20220722.csv")
+
+
+```
+
+
+#General overview
+```{r find multiple genes and plot}
+#multiple genes find ENS name and create data frame with both names
+geneName <- c("TRDN", "DES", "TNNT3", "MYH1", "COL1A2", "COL3A1", "DCN", "NEGR1", "FBLN1", "TNNT1", "ATP2A2", "MYH7", "PIEZO2", "COL12A1", "MKX", "COL22A1", "CPM", "SORBS2", "PECAM1", "PTPRB", "FLT1", "VWF", "PAX7", "CALCR", "GREM1", "NOTCH3", "PDGFRB", "MYO1B", "MMRN1", "PROX1", "KDR", "FLT4", "MYH11", "NTRK3", "ITGA8", "GPAM", "AQP7", "ADIPOQ", "PTPRC", "CD247", "CD69", "BLNK", "CD163", "MSR1")
+whereitis <- match(geneName, hgnc_list$geneName)
+EnsName <- hgnc_list$EnsName[whereitis]
+geneName <- data.frame(geneName, EnsName)
+remove(whereitis, EnsName) #cleanup
+
+#use this to plot and change the title for the gene name
+#plot4 <- DotPlot(data.integrated3, features = geneName$EnsName, cols = c("blue", "red"))
+plot4 <- DotPlot(data.integrated.labelled, features = geneName$EnsName, cols = c("blue", "red"))
+
+#plot, remove the xlabels of Ens and replace with gene names
+plot4 + scale_x_discrete(breaks=geneName$EnsName, labels=geneName$geneName) + ggtitle("General") + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+#remove(geneName, plot4) #cleanup
+```
+
+#Muscle-like cells
+```{r find multiple genes and plot}
+#multiple genes find ENS name and create data frame with both names
+geneName <- c("TRDN", "DES", "ACTN2", "TNNC2", "TNNI2", "TNNT3", "ACTN3", "HOMER1", "KCNQ5", "MYH1", "MYH3", "MYLK4", "MYBPC2",  "TNNC1", "TNNI1", "TNNT1", "ATP2A2", "CCR3", "LGR5", "MYH7", "MYH7B", "NEK10", "TECRL", "COL22A1", "ADAMTSL1", "CPM", "CSMD1", "FRAS1", "PZP", "RALYL", "SAMD5", "SORBS2", "SPAG16")
+whereitis <- match(geneName, hgnc_list$geneName)
+EnsName <- hgnc_list$EnsName[whereitis]
+geneName <- data.frame(geneName, EnsName)
+remove(whereitis, EnsName) #cleanup
+
+#use this to plot and change the title for the gene name
+#plot4 <- DotPlot(data.integrated3, features = geneName$EnsName, cols = c("blue", "red"))
+plot4 <- DotPlot(data.integrated.labelled, features = geneName$EnsName, cols = c("blue", "red"))
+
+#plot, remove the xlabels of Ens and replace with gene names
+plot4 + scale_x_discrete(breaks=geneName$EnsName, labels=geneName$geneName) + ggtitle("Muscle-like cells") + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+#remove(geneName, plot4) #cleanup
+```
+
+#Fibroblasts
+```{r find multiple genes and plot}
+#multiple genes find ENS name and create data frame with both names
+geneName <- c("COL1A1", "COL1A2", "COL3A1", "COL3A2",  "DCN", 
+              "ABCA8", "COL15A1", "CD55", "DCLK1", "ELN", "FBN1", "FBLN1", "FBLN2", "FBLN5", "KCND2", "NEGR1", "NOVA1", "VIT",
+              "CADM1", "COL11A1", "COL11A2", "COL12A1", "COL24A1", "COMP", "CPXM2", "FMOD", "MET", "MKX", "ITGA10", "PIEZO2", "THBS4", "THSD4")
+
+whereitis <- match(geneName, hgnc_list$geneName)
+EnsName <- hgnc_list$EnsName[whereitis]
+geneName <- data.frame(geneName, EnsName)
+remove(whereitis, EnsName) #cleanup
+
+#use this to plot and change the title for the gene name
+#plot4 <- DotPlot(data.integrated3, features = geneName$EnsName, cols = c("blue", "red"))
+plot4 <- DotPlot(data.integrated.labelled, features = geneName$EnsName, cols = c("blue", "red"))
+
+#plot, remove the xlabels of Ens and replace with gene names
+plot4 + scale_x_discrete(breaks=geneName$EnsName, labels=geneName$geneName) + ggtitle("Fibroblasts") + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+#remove(geneName, plot4) #cleanup
+```
+
+
+
+
+#Immune cells
+```{r find multiple genes and plot}
+#multiple genes find ENS name and create data frame with both names
+
+#CD69 = associated with different immune cells
+#CD2 = on T cells and NK cells
+geneName <- c("PTPRC", "CD2", "CD247", "IL7R", "CD27", "CD53", "CD69", "CD83", "MS4A1", "BLNK", "CD14", "CD163", "CD163L1", "MSR1", "DOCK2")
+whereitis <- match(geneName, hgnc_list$geneName)
+EnsName <- hgnc_list$EnsName[whereitis]
+geneName <- data.frame(geneName, EnsName)
+remove(whereitis, EnsName) #cleanup
+
+#use this to plot and change the title for the gene name
+#plot4 <- DotPlot(data.integrated3, features = geneName$EnsName, cols = c("blue", "red"))
+plot4 <- DotPlot(data.integrated.labelled, features = geneName$EnsName, cols = c("blue", "red"))
+
+#plot, remove the xlabels of Ens and replace with gene names
+plot4 + scale_x_discrete(breaks=geneName$EnsName, labels=geneName$geneName) +ggtitle("Immune cells") + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+#remove(geneName, plot4) #cleanup
+```
+
+
+
+#Endothelial cells
+```{r find multiple genes and plot}
+#multiple genes find ENS name and create data frame with both names
+#PECAM (CD31) = Endothelial cell marker
+#VCAM = Endothelial cell marker
+#FLT1 = VEGF-receptor 1
+#KDR = VEGF-receptor 2
+#CD34 = 
+#CDH5 = VE-cadherin
+#NOTCH3 = smooth muscle cell marker (mural cells)
+#ACTA2 = expressed by vSMC but not pericytes
+#long list: geneName <- c("PECAM1", "VCAM1", "MCAM", "ICAM1", "FLT1", "KDR", "FLT4", "CD34", "CDH5", "NOTCH3", "PDGFRA", "PDGFRB", "ACTA2", "LYVE1", "VEGFA", "VEGFB", "VEGFC", "VEGFD", "CD248", "VWF", "ANGPT1", "MYO1A", "MYO1B", "ADAMTS12", "EBF2", "COL5A1", "COL5A2", "NAV1", "NAV3", "PGF", "SPARC", "NOTCH4", "CD44", "ITM2A", "EVA1", "LEFTY1", "LEFTY2", "GDF1", "EPHB4", "ENG")
+geneName <- c("PECAM1", "PTPRB", "VWF", "ADGRL4", "CD34", "CDH5", "FLT1", "NOTCH4", "TEK", "NOTCH3", "ADAMTS12", "EBF2", "MYO1B", "PDE1C", "PDGFRB", "EPHB4", "FLT4", "KDR", "MMRN1", "NRG3", "PKHD1L1", "PROX1", "FLNA", "IRAG1", "ITGA8", "LMOD1", "MYH11", "NTRK3",  "SYNPO2")
+whereitis <- match(geneName, hgnc_list$geneName)
+EnsName <- hgnc_list$EnsName[whereitis]
+geneName <- data.frame(geneName, EnsName)
+remove(whereitis, EnsName) #cleanup
+
+#use this to plot and change the title for the gene name
+#plot4 <- DotPlot(data.integrated3, features = geneName$EnsName, cols = c("blue", "red"))
+plot4 <- DotPlot(data.integrated.labelled, features = geneName$EnsName, cols = c("blue", "red"))
+
+#plot, remove the xlabels of Ens and replace with gene names
+plot4 + scale_x_discrete(breaks=geneName$EnsName, labels=geneName$geneName) +ggtitle("Endothelial and smooth muscle cells") + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+#remove(geneName, plot4) #cleanup
+```
+
+#Myosins
+```{r find multiple genes and plot}
+#NSG2
+#CTNNA2 = regulate cell-cell adhestion and differentiation in nervous system
+#DCC = mediates axon attraction of neuronal growth cones in the developing nervous system upon ligand binding
+
+geneName <- c("ACTA2", "ACTG2", "CNN1", "MB", "MYH2", "MYH9", "MYH10", "MYH11", "MYH14", "MYL1", "MYL3", "MYL4", "MYL6", "MYL2", "MYL5", "MYL7", "MYL9")
+whereitis <- match(geneName, hgnc_list$geneName)
+EnsName <- hgnc_list$EnsName[whereitis]
+geneName <- data.frame(geneName, EnsName)
+remove(whereitis, EnsName) #cleanup
+
+#use this to plot and change the title for the gene name
+plot4 <- DotPlot(data.integrated3, features = geneName$EnsName, cols = c("blue", "red"))
+
+#plot, remove the xlabels of Ens and replace with gene names
+plot4 + scale_x_discrete(breaks=geneName$EnsName, labels=geneName$geneName) +ggtitle("Myosins") + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+#remove(geneName, plot4) #cleanup
+```
+
+#Cluster9
+```{r}
+geneName <- c("ACTA2", "ACTG2", "CNN1", "FLNA", "IRAG1", "KCNMB1", "MYH11", "MYL9", "MYLK", "TAGLN", "ACTC1", "ASB2", "CASQ2", "CSDC2", "DACT3", "DBNDD2", "DES", "DNAJB5", "FBXL22", "FLNC", "IL17B", "ITGA8", "ITIH3", "JPH2", "KCNMA1", "LDB3", "LMOD1", "MUSTN1", "MYOCD", "NCS1", "NKD1", "NTRK3", "PDLIM3", "PLN", "PPP1R14A", "RASL12", "SCUBE3", "SMTN", "SYNM", "SYNPO2", "TGFB1I1", "TPM1", "TPM2", "TPM3", "TPM4", "WFDC1")
+whereitis <- match(geneName, hgnc_list$geneName)
+EnsName <- hgnc_list$EnsName[whereitis]
+geneName <- data.frame(geneName, EnsName)
+remove(whereitis, EnsName) #cleanup
+
+#use this to plot and change the title for the gene name
+plot4 <- DotPlot(data.integrated3, features = geneName$EnsName, cols = c("blue", "red"))
+
+#plot, remove the xlabels of Ens and replace with gene names
+plot4 + scale_x_discrete(breaks=geneName$EnsName, labels=geneName$geneName) +ggtitle("Smooth Muscle Cells") + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+#remove(geneName, plot4) #cleanup
+```
+
+
+#Extracellular matrix
+```{r find multiple genes and plot}
+#multiple genes find ENS name and create data frame with both names
+#CRLR
+geneName <- c("COL1A1", "COL1A2", "COL3A1", "COL4A1", "COL5A1", "COL5A2", "COL5A3", "COL11A1", "COL11A2", "COL12A1", "COL14A1", "COL15A1", "ELN", "PRG4", "FBN1", "FBN2", "FBN3", "EMILIN1", "COMP", "DCN", "BGN", "SPOCK1", "SPOCK2", "SPOCK3", "AMBP", "FMOD", "LUM", "ACAN", "HSPG2", "TGFBR3", "AGRN", "NCAN", "BCAN", "VCAN", "FBLN1", "FBLN2", "FBLN3", "FBLN4", "FBLN5", "LAMA1", "LAMA2", "LAMA3", "LAMA4", "LAMA5")
+whereitis <- match(geneName, hgnc_list$geneName)
+EnsName <- hgnc_list$EnsName[whereitis]
+geneName <- data.frame(geneName, EnsName)
+remove(whereitis, EnsName) #cleanup
+
+#use this to plot and change the title for the gene name
+plot4 <- DotPlot(data.integrated3, features = geneName$EnsName, cols = c("blue", "red"))
+
+#plot, remove the xlabels of Ens and replace with gene names
+plot4 + scale_x_discrete(breaks=geneName$EnsName, labels=geneName$geneName) +ggtitle("Extracellular matrix") + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+#remove(geneName, plot4) #cleanup
+```
+
+
+#All collagens
+```{r find multiple genes and plot}
+#multiple genes find ENS name and create data frame with both names
+#CRLR
+geneName <- c("COL1A1", "COL1A2", "COL2A1", "COL3A1", "COL4A1","COL4A2","COL4A3", "COL4A4", "COL4A5", "COL4A6", "COL5A1", "COL5A2", "COL5A3", "COL6A1", "COL6A2", "COL6A3", "COL6A5", "COL7A1", "COL8A1", "COL8A2", "COL9A1", "COL9A2", "COL9A3", "COL10A1",  "COL11A1", "COL11A2", "COL12A1", "COL13A1", "COL14A1", "COL15A1", "COL16A1", "COL17A1", "COL18A1", "COL19A1", "COL20A1", "COL21A1", "COL22A1", "COL23A1", "COL24A1", "COL25A1", "EMID2", "COL27A1", "COL28A1", "COL29A1")
+whereitis <- match(geneName, hgnc_list$geneName)
+EnsName <- hgnc_list$EnsName[whereitis]
+geneName <- data.frame(geneName, EnsName)
+remove(whereitis, EnsName) #cleanup
+
+#use this to plot and change the title for the gene name
+plot4 <- DotPlot(data.integrated3, features = geneName$EnsName, cols = c("blue", "red"))
+
+#plot, remove the xlabels of Ens and replace with gene names
+plot4 + scale_x_discrete(breaks=geneName$EnsName, labels=geneName$geneName) +ggtitle("Collagens") + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+#remove(geneName, plot4) #cleanup
+```
+
+#Adipose
+```{r find multiple genes and plot}
+#multiple genes find ENS name and create data frame with both names
+
+geneName <- c("PDE3B", "GPAM", "TMEM132C", "PLIN1", "PLIN4", "AQP7", "ADIPOQ")
+whereitis <- match(geneName, hgnc_list$geneName)
+EnsName <- hgnc_list$EnsName[whereitis]
+geneName <- data.frame(geneName, EnsName)
+remove(whereitis, EnsName) #cleanup
+
+#use this to plot and change the title for the gene name
+#plot4 <- DotPlot(data.integrated3, features = geneName$EnsName, cols = c("blue", "red"))
+plot4 <- DotPlot(data.integrated.labelled, features = geneName$EnsName, cols = c("blue", "red"))
+
+#plot, remove the xlabels of Ens and replace with gene names
+plot4 + scale_x_discrete(breaks=geneName$EnsName, labels=geneName$geneName) +ggtitle("Adipocytes") + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+#remove(geneName, plot4) #cleanup
+```
+
+#Satellite cells
+```{r find multiple genes and plot}
+#multiple genes find ENS name and create data frame with both names
+
+geneName <- c("PAX7", "CALCR", "CDH4", "CLCN5", "CTNND2", "GREM1")
+whereitis <- match(geneName, hgnc_list$geneName)
+EnsName <- hgnc_list$EnsName[whereitis]
+geneName <- data.frame(geneName, EnsName)
+remove(whereitis, EnsName) #cleanup
+
+#use this to plot and change the title for the gene name
+#plot4 <- DotPlot(data.integrated3, features = geneName$EnsName, cols = c("blue", "red"))
+plot4 <- DotPlot(data.integrated.labelled, features = geneName$EnsName, cols = c("blue", "red"))
+
+#plot, remove the xlabels of Ens and replace with gene names
+plot4 + scale_x_discrete(breaks=geneName$EnsName, labels=geneName$geneName) +ggtitle("Satellite cells") + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+#remove(geneName, plot4) #cleanup
+```
+
+
+#Kendal paper, Figure 2A
+```{r find multiple genes and plot}
+#multiple genes find ENS name and create data frame with both names
+
+geneName <- c("COL1A1", "COL1A2", "SCX", "FBN1", "MFAP5", "VCAN", "EMILIN1", "TGFB1", "LTBP1", "LTBP2", "COL4A1", "POSTN", "COL5A1", "COL5A2", "COL11A1", "ACAN", "NES", "TNC", "TPM2", "TAGLN", "MYL9", "ACTA2", "RGS5", "ITGA7", "COL14A1", "COL6A1", "COL6A2", "COL6A3", "COL3A1", "BGN", "FBLN1", "DPT", "CXCL14", "LY6E", "TPPP3", "PDGFRA", "FN1", "DCN", "LUM", "ASPN", "FMOD", "PRELP", "COMP", "TNXB", "PRG4", "ABI3BP", "CILP", "CILP2", "THBS4", "MYOC", "VTN", "CLEC3B", "CLEC15A1", "COL2A1", "OGN", "TNMD")
+whereitis <- match(geneName, hgnc_list$geneName)
+EnsName <- hgnc_list$EnsName[whereitis]
+geneName <- data.frame(geneName, EnsName)
+remove(whereitis, EnsName) #cleanup
+
+#use this to plot and change the title for the gene name
+#plot4 <- DotPlot(data.integrated3, features = geneName$EnsName, cols = c("blue", "red"))
+plot4 <- DotPlot(data.integrated.labelled, features = geneName$EnsName, cols = c("blue", "red"), idents = c("1, 3"))
+
+#plot, remove the xlabels of Ens and replace with gene names
+plot4 + scale_x_discrete(breaks=geneName$EnsName, labels=geneName$geneName) +ggtitle("Kendal paper, Figure 2") + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+#remove(geneName, plot4) #cleanup
+```
+
+#Find specific marker
+```{r}
+geneName <- c("NTS")
+whereitis <- match(geneName, hgnc_list$geneName)
+EnsName <- hgnc_list$EnsName[whereitis]
+geneName <- data.frame(geneName, EnsName)
+
+FeaturePlot(data.integrated.labelled, features = geneName$EnsName) + ggtitle(geneName$geneName)
+VlnPlot(data.integrated.labelled, features = geneName$EnsName) + ggtitle(geneName$geneName)
+DotPlot(data.integrated.labelled, features = geneName$EnsName, cols = c("blue", "red")) + ggtitle(geneName$geneName)
+
+#FeaturePlot(data.integrated3, features = geneName$EnsName) + ggtitle(geneName$geneName)
+#VlnPlot(data.integrated3, features = geneName$EnsName) + ggtitle(geneName$geneName)
+#DotPlot(data.integrated3, features = geneName$EnsName, cols = c("blue", "red")) + ggtitle(geneName$geneName)
+
+remove(whereitis, EnsName, geneName) #cleanup
+```
+
+
+
+#Make heatmap of selected genes, with the option of only selecting certain clusters
+#Troponins
+```{r}
+library(pheatmap)
+#old version: geneName <- c("DCN", "TPM3", "DES", "TTN", "TRDN", "NCAM1", "LAMA2", "NOS1", "COL22A1", "KCNQ5", "CD36", "BICC1", "EGFR", "BICD1", "DEPTOR", "TNNT3", "TNNT1", "RYR3", "MYL3", "DOCK10", "MYH7", "MEG8", "CSMD1", "SORBS2", "OPCML", "PELI1", "ADAMTSL1", "STAC", "CUX2", "MMP2", "GRID1", "EBF1", "MYOC", "BMP5", "NEGR1", "NOVA1", "TSHZ2", "DLC1", "FBLN1", "MYBPC1", "EMC10")
+
+geneName <- c("TNNT1", "TNNT2", "TNNT3", "TNNI1", "TNNI2", "TNNI3", "TNNC1", "TNNC2")
+whereitis <- match(geneName, hgnc_list$geneName)
+EnsName <- hgnc_list$EnsName[whereitis]
+genes <- data.frame(geneName, EnsName)
+
+genes <- intersect(genes$EnsName, rownames(GetAssayData(data.integrated.labelled, slot = 'data')))
+mat <- AverageExpression(data.integrated.labelled, features = genes, slot = 'data')
+
+mat1 <- t(scale(t(mat$RNA)))
+
+#select which clusters you want to show using the following function; if you want to show all clusters, use mat1
+mat2 <- subset(mat1, select = c("TNNT3+ TRDN+ cells", "TNNT1+ TRDN+ cells", "COL22A1+ TRDN+ cells"))
+
+paletteLength = 50
+myColor <- colorRampPalette(c("navy", "white", "red"))(50)
+myBreaks <- c(seq(min(mat1), 0, length.out=ceiling(paletteLength/2) + 1), seq(max(mat1)/paletteLength, max(mat1), length.out=floor(paletteLength/2)))
+
+pheatmap(mat2, 
+         labels_row = geneName,
+         na_col = "black",
+         color = myColor,
+         breaks = myBreaks,
+         display_numbers = TRUE)
+
+pheatmap(mat2, 
+         labels_row = geneName,
+         na_col = "black",
+         display_numbers = TRUE)
+
+```
+
+
+
+
+
+#Comparing specific clusters
+```{r comparing specific clusters}
+# find all markers distinguishing Tenocytes A vs Tenocytes B
+C1vsC3.markers <- FindMarkers(data.integrated3, ident.1 = c(1), ident.2 = c(3), min.pct = 0.25)
+whereitis <- match(rownames(C1vsC3.markers), hgnc_list$EnsName)
+C1vsC3.markers$geneName <- hgnc_list$geneName[whereitis]
+remove(whereitis) #cleanup
+#write.csv(Fib4vsFib7, "Fib4vsFib7.csv")
+
+```
+
+#GO Analysis with gProfiler 2
+```{r}
+library(gprofiler2)
+set.seed(500)
+topcluster <- Cluster4 %>% 
+  filter(avg_log2FC > 0.5) %>%
+  top_n(n=100, wt = avg_log2FC)
+gost.res <- gost(topcluster$geneName, organism = "hsapiens", correction_method = "fdr", sources = "REAC")
+p <- gostplot(gost.res, interactive = T, capped = T)
+p
+#publish_gosttable(gost.res, highlight_terms = NULL, use_colors = TRUE, show_columns = c("source", "term_name", "term_size", "intersection_size"), filename = NULL)
+
+ReactomeCluster4 <- gost.res$result
+```
+
+#Reactome analysis dotplot Clusters 1 and 3
+```{r}
+Cluster1Reactome$Dataset = "Cluster1"
+Cluster3Reactome$Dataset = "Cluster3"
+
+ReactomeFibroblasts = merge(Cluster1Reactome, Cluster3Reactome, all=TRUE)
+
+p <- ggplot(ReactomeFibroblasts, aes(x = precision, y = fct_reorder(term_name, precision))) + 
+  geom_point(aes(size = precision, color = p_value)) +
+  theme_bw(base_size = 14) +
+  scale_colour_gradient(limits=c(0, 0.05), low="red") +
+  ylab(NULL) +
+  ggtitle("Reactome Fibroblasts")
+p + facet_grid(.~Dataset)
+```
+
+#Reactome analysis dotplot Clusters 0 and 4
+```{r}
+ReactomeCluster0$Dataset = "Cluster0"
+ReactomeCluster2$Dataset = "Cluster2"
+
+ReactomeFibroblasts = merge(ReactomeCluster0, ReactomeCluster2, all=TRUE)
+
+p <- ggplot(ReactomeFibroblasts, aes(x = precision, y = fct_reorder(term_name, precision))) + 
+  geom_point(aes(size = precision, color = p_value)) +
+  theme_bw(base_size = 14) +
+  scale_colour_gradient(limits=c(0, 0.05), low="red") +
+  ylab(NULL) +
+  ggtitle("Reactome TRDN+ cells")
+p + facet_grid(.~Dataset)
+```
+
+#Add labels for each cluster
+```{r}
+data.integrated.labelled <- data.integrated3
+new.cluster.ids <- c("TNNT3+ TRDN+ cells", "FBLN+ Fibroblasts", "TNNT1+ TRDN+ cells", "MKX+ Fibroblasts", "COL22A1+ TRDN+ cells", "Vascular endothelium", "Satellite cells", "Mural cells", "Lymphatic endothelium", "Smooth Muscle Cells", "Adipocytes", "Immune cells")
+names(new.cluster.ids) <- levels(data.integrated.labelled)
+data.integrated.labelled <- RenameIdents(data.integrated.labelled, new.cluster.ids)
+DimPlot(data.integrated.labelled, reduction = "umap", repel = TRUE, label = TRUE, label.size = 3, pt.size = 0.8) + NoLegend()
+remove(new.cluster.ids)
+```
+
+
+#Save RDS file
+```{r save}
+#Ham.integrated <- data.integrated
+saveRDS(data.integrated3.integrated, file="HAMSTRING_April2022.RDS")
+
+```
+
+
